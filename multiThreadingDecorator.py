@@ -1,77 +1,78 @@
 
-
-
 import time
 import threading
 import math
 import queue
 
 
+def multithreadFunction(maxNumberOfWorkers):
+    # This outer layer provides a parameter to the actual decorator.
+    # <maxNumberOfWorkers> : The max number of threads that will be created.
 
-def multiThreadFunction(originalFunction, *args, **kwargs):
-    # This decorator multi-threads the <originalFunction>.
-    # The <originalFunction> needs to receive the tasks to be done as a [list] in its first argument, and return the solution to each tasks as a [list] of results.
-    # This constraint imposes to compute all solutions before eventually fusing them (summing them, for example).
-    # The multi-threading steps are :
-    #     - Split the list in <numberOfWorkers> sublists.
-    #     - Start <numberOfWorkers> processes, each computing the <originalFunction> on one sublist each.
-    #     - Wait for all workers to be finished.
-    #     - Fuse the results of all workers and return the full result.
+    def _multithreadFunction(originalFunction):
+        # This decorator multithreads <originalFunction> .
+        # <originalFunction> needs to receive a [list] of tasks to be done as its first argument and return a [list] of solutions.
+        # Multithreading steps :
+        #     1. Split the list in n sublists ;
+        #     2. Create n threads, each computing <originalFunction> on one sublist ;
+        #     3. Wait for all threads to be finished ;
+        #     4. Fuse the results of all threads and return the full result.
 
-    maxNumberOfWorkers = 4
-    localQueue = queue.Queue()
+        def _workerFunction(originalFunction, subList, queue, workerNumber, *args, **kwargs):
+            # A worker executes the original function on a sublist of tasks and returns the results.
+            originalArgs = (subList, *args)
+            result = originalFunction(*originalArgs, **kwargs)
+            queue.put((workerNumber, result)) # <workerNumber> is used to sort the results
+            return
 
-    def _workerFunction(originalFunction, subList, queue, workerNumber, *args, **kwargs):
-        # This worker function executes the original function on a sublist of tasks and return the results
-        originalArgs = (subList, *args)
-        result = originalFunction(*originalArgs, **kwargs)
-        localQueue.put((workerNumber, result)) # The <workerNumber> is used to sort() the results later
-        return
+        def _multithreadedFunction(*args, **kwargs):
 
-    def _multiThreadedFunction(*args, **kwargs):
-        fullList = args[0] # The original list of tasks to be splitted
-        numberOfWorkers = min(maxNumberOfWorkers, len(fullList)) # At most one worker per task
+            assert len(args) > 0, "Multithreaded function received no argument, at least the list of tasks to be performed is required."
+            assert isinstance(args[0], list), "Multithreaded function did not receive a list as its first argument. A list of tasks needs to be provided as the first argument."
 
-        workers = []
-        for workerNumber in range(numberOfWorkers):
-            workerList = fullList[math.floor(workerNumber * len(fullList) / numberOfWorkers) : math.floor((workerNumber + 1) * len(fullList) / numberOfWorkers)]
-            if not(isinstance(workerList, list)): workerList = [workerList] # Prevent edge-case where a singleton looses its list nature
-            arguments = (originalFunction, workerList, localQueue, workerNumber, *(args[1:]))
-            kwarguments = kwargs
-            worker = threading.Thread(target=_workerFunction, args=(arguments), kwargs=(kwarguments))
-            workers.append(worker)
+            fullList = args[0] # The original list of tasks to be splitted
+            numberOfWorkers = min(maxNumberOfWorkers, len(fullList)) # At most one worker per task
+            _queue = queue.Queue()
 
-        for worker in workers:
-            worker.start()
+            workers = []
+            for workerNumber in range(numberOfWorkers):
+                workerList = fullList[math.floor(workerNumber * len(fullList) / numberOfWorkers) : math.floor((workerNumber + 1) * len(fullList) / numberOfWorkers)]
+                arguments = (originalFunction, workerList, _queue, workerNumber, *(args[1:]))
+                kwarguments = kwargs
+                worker = threading.Thread(target=_workerFunction, args=(arguments), kwargs=(kwarguments))
+                workers.append(worker)
 
-        for worker in workers:
-            worker.join() # Waiting for all workers to be finished
+            for worker in workers:
+                worker.start()
 
-        workerResults = []
-        while not localQueue.empty(): # Reading the partial results from all workers
-            workerResult = localQueue.get()
-            workerResults.append(workerResult)
+            for worker in workers:
+                worker.join() # Waiting for all workers to be finished
 
-        results = []
-        workerResults.sort(key=lambda x:x[0]) # Sorting the partial results to match the original task list
-        for workerResult in workerResults: # Concatenating all partial results
-            results.extend(workerResult[1])
-        
-        return results
+            workerResults = []
+            while not _queue.empty():
+                workerResult = _queue.get() # Reading partial results from all workers
+                workerResults.append(workerResult)
 
-    return _multiThreadedFunction
+            results = []
+            workerResults.sort(key=lambda x:x[0]) # Sorting the partial results
+            for workerResult in workerResults:
+                results.extend(workerResult[1]) # Fusing all partial results in order
+
+            return results
+        return _multithreadedFunction
+    return _multithreadFunction
 
 
 if (__name__ == "__main__"):
 
-    myList = list(range(200))
+    myList = list(range(20))
 
     # @multiThreadFunction
     def computeSquares(listToSquare, initialValue, endMessage=''):
         results = []
         for elt in listToSquare:
             results.append(elt*elt + initialValue)
-            time.sleep(0.5)
+            time.sleep(0.1) # Simulating a long task to solve
         print(endMessage)
         return results
 
