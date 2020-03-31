@@ -67,7 +67,7 @@ if (__name__ == "__main__"):
 
     myList = list(range(20))
 
-    # @multiThreadFunction
+    @multithreadFunction(16)
     def computeSquares(listToSquare, initialValue, endMessage=''):
         results = []
         for elt in listToSquare:
